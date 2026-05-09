@@ -1,4 +1,6 @@
 import os
+import hashlib
+import bcrypt  # SỬ DỤNG TRỰC TIẾP BCRYPT, BỎ PASSLIB
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -6,7 +8,6 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.user import User
-import hashlib
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -28,7 +29,6 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     except JWTError:
         raise credentials_exception
     
-   
     user = db.query(User).filter(User.id == int(user_id)).first()
     if user is None:
         raise credentials_exception
@@ -41,9 +41,28 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# --- HÀM BĂM TOKEN ---
+# --- HÀM BĂM TOKEN CỦA TV C ---
 def get_token_hash(token: str) -> str:
-    """
-    Băm token bằng thuật toán SHA-256 để lưu vào database.
-    """
+    """Băm token bằng thuật toán SHA-256 để lưu vào database."""
     return hashlib.sha256(token.encode()).hexdigest()
+
+# =====================================================================
+# --- HÀM XỬ LÝ MẬT KHẨU MỚI (KHÔNG DÙNG PASSLIB) ---
+# =====================================================================
+
+def get_password_hash(password: str) -> str:
+    """Mã hóa mật khẩu bằng bcrypt trực tiếp."""
+    # Chuyển string thành byte
+    pwd_bytes = password.encode('utf-8')
+    # Tạo chuỗi muối (salt)
+    salt = bcrypt.gensalt()
+    # Băm mật khẩu
+    hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+    # Chuyển byte thành string để lưu vào DB
+    return hashed_password.decode('utf-8')
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Hàm này sẽ dùng cho bạn Huy (Member B) làm Login sau này"""
+    password_byte_enc = plain_password.encode('utf-8')
+    hashed_password_byte_enc = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password=password_byte_enc, hashed_password=hashed_password_byte_enc)

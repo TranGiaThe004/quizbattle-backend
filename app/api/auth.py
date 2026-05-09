@@ -1,30 +1,71 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.db.session import get_db
+
+# Import các Models
 from app.models.token import RefreshToken
-from app.schemas.auth import RefreshTokenRequest, LogoutRequest
-from app.core.security import get_current_user, create_access_token, get_token_hash
+from app.models.user import User
+
+# Import Schemas
+from app.schemas.auth import RefreshTokenRequest, LogoutRequest, UserCreate, UserResponse
+
+# Import logic Security
+from app.core.security import get_current_user, create_access_token, get_token_hash, get_password_hash
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
+# ----------------------------------------------------
+# 1. API CỦA MEMBER A (REGISTER)
+# ----------------------------------------------------
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def register(user_in: UserCreate, db: Session = Depends(get_db)):
+    # Kiểm tra Email trùng
+    if db.query(User).filter(User.email == user_in.email).first():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email đã tồn tại."
+        )
+    
+    # Kiểm tra Username trùng
+    if db.query(User).filter(User.username == user_in.username).first():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tên đăng nhập đã tồn tại."
+        )
 
+    # Hash password và lưu
+    hashed_password = get_password_hash(user_in.password)
+    new_user = User(
+        username=user_in.username,
+        email=user_in.email,
+        password_hash=hashed_password
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return new_user
+
+# ----------------------------------------------------
+# 2. API CỦA TV C ĐÃ LÀM SẴN
+# ----------------------------------------------------
 @router.get("/me")
-def get_me(current_user = Depends(get_current_user)):
+def get_me(current_user: User = Depends(get_current_user)):
     return {
         "success": True, 
         "data": {
-            "id": current_user.id
+            "id": current_user.id,
+            "username": current_user.username,
+            "email": current_user.email
         }
     }
 
 @router.post("/refresh")
 def refresh_token(req: RefreshTokenRequest, db: Session = Depends(get_db)):
-
     hashed_token = get_token_hash(req.refresh_token)
-   
     db_token = db.query(RefreshToken).filter(RefreshToken.token_hash == hashed_token).first()
-   
+    
     if not db_token or db_token.revoked_at or db_token.expires_at < datetime.utcnow():
         raise HTTPException(status_code=401, detail="Refresh token không hợp lệ hoặc đã hết hạn")
   
@@ -33,7 +74,6 @@ def refresh_token(req: RefreshTokenRequest, db: Session = Depends(get_db)):
 
 @router.post("/logout")
 def logout(req: LogoutRequest, db: Session = Depends(get_db)):
-
     hashed_token = get_token_hash(req.refresh_token)
     db_token = db.query(RefreshToken).filter(RefreshToken.token_hash == hashed_token).first()
     if db_token and not db_token.revoked_at:

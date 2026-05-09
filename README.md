@@ -20,3 +20,15 @@ Backend service for QuizBattle realtime quiz battle platform.
 ```txt
 main    = stable/demo branch
 develop = working branch for team
+
+
+## Câu lệnh khởi chạy backend
+cd /d "D:\Odin Intern\QuizBattle Project\quizbattle-backend"
+conda activate quizbattle
+python --version
+python -m uvicorn app.main:app --reload
+
+## khơi chạy docker
+docker compose up -d
+docker compose down
+docker ps
