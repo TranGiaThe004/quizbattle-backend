@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from app.api import auth
 
 app = FastAPI(
     title="QuizBattle API",
@@ -6,6 +7,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
+app.include_router(auth.router)
 
 @app.get("/")
 def root():
