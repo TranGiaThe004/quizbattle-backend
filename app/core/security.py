@@ -6,6 +6,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.user import User
+import hashlib
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -39,3 +40,10 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=15))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# --- HÀM BĂM TOKEN ---
+def get_token_hash(token: str) -> str:
+    """
+    Băm token bằng thuật toán SHA-256 để lưu vào database.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
