@@ -16,5 +16,5 @@ class Quiz(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Quan hệ
-    owner = relationship("User", back_populates="quizzes")
+    host = relationship("User", back_populates="quizzes") # <--- Đổi 'owner' thành 'host' ở đây
     questions = relationship("Question", back_populates="quiz", cascade="all, delete-orphan")
