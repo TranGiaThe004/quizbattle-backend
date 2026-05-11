@@ -6,6 +6,7 @@ from app.db.session import engine
 
 from app.api.v1.routes import auth, quizzes, questions
 
+
 app = FastAPI(
     title="QuizBattle API",
     description="Backend API for realtime quiz battle platform",
