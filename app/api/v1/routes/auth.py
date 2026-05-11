@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime,timezone
 from app.db.session import get_db
 
 # Import các Models
@@ -81,8 +81,7 @@ def get_me(current_user: User = Depends(get_current_user)):
 def refresh_token(req: RefreshTokenRequest, db: Session = Depends(get_db)):
     hashed_token = get_token_hash(req.refresh_token)
     db_token = db.query(RefreshToken).filter(RefreshToken.token_hash == hashed_token).first()
-    
-    if not db_token or db_token.revoked_at or db_token.expires_at < datetime.utcnow():
+    if not db_token or db_token.revoked_at or db_token.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Refresh token không hợp lệ hoặc đã hết hạn")
   
     new_access_token = create_access_token(data={"sub": str(db_token.user_id)})
@@ -93,7 +92,7 @@ def logout(req: LogoutRequest, db: Session = Depends(get_db)):
     hashed_token = get_token_hash(req.refresh_token)
     db_token = db.query(RefreshToken).filter(RefreshToken.token_hash == hashed_token).first()
     if db_token and not db_token.revoked_at:
-        db_token.revoked_at = datetime.utcnow()
+        db_token.revoked_at = datetime.now(timezone.utc)
         db.commit()
         
     return {"success": True, "message": "Đã đăng xuất thành công"}

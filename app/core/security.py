@@ -4,6 +4,7 @@ import bcrypt  # SỬ DỤNG TRỰC TIẾP BCRYPT, BỎ PASSLIB
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from passlib.context import CryptContext
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -11,6 +12,7 @@ from app.models.user import User
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "quizbattle_secret_key_2026")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")

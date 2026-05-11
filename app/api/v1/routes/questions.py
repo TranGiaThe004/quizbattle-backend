@@ -2,7 +2,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.quiz import Quiz, Question
+from app.models.question import Question
+from app.models.quiz import Quiz
 from app.models.user import User
 from app.schemas.quiz import QuestionUpdate
 from app.schemas.common import StandardResponse

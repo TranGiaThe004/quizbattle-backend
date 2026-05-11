@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # SỬA LẠI ĐƯỜNG DẪN IMPORT CHUẨN Ở ĐÂY:
 from app.api.v1.routes import auth, quizzes, questions
 
+
 app = FastAPI(
     title="QuizBattle API",
     description="Backend API for realtime quiz battle platform",
