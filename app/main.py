@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth
+
+# SỬA LẠI ĐƯỜNG DẪN IMPORT CHUẨN Ở ĐÂY:
+from app.api.v1.routes import auth, quizzes, questions
 
 app = FastAPI(
     title="QuizBattle API",
@@ -8,7 +10,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# --- THÊM CẤU HÌNH CORS Ở ĐÂY ---
+# --- CẤU HÌNH CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],  # Cho phép Frontend gọi API
@@ -18,7 +20,10 @@ app.add_middleware(
 )
 # --------------------------------
 
+# --- ĐĂNG KÝ CÁC ROUTER VÀO ĐÂY ---
 app.include_router(auth.router)
+app.include_router(quizzes.router)
+app.include_router(questions.router)
 
 @app.get("/")
 def root():
