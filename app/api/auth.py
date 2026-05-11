@@ -8,10 +8,26 @@ from app.models.token import RefreshToken
 from app.models.user import User
 
 # Import Schemas
-from app.schemas.auth import RefreshTokenRequest, LogoutRequest, UserCreate, UserResponse
+# from app.schemas.auth import RefreshTokenRequest, LogoutRequest, UserCreate, UserResponse
+from app.schemas.auth import (
+    RefreshTokenRequest,
+    LogoutRequest,
+    UserCreate,
+    UserResponse,
+    LoginRequest,
+    TokenResponse
+)
 
 # Import logic Security
-from app.core.security import get_current_user, create_access_token, get_token_hash, get_password_hash
+# from app.core.security import get_current_user, create_access_token, get_token_hash, get_password_hash
+from app.core.security import (
+    get_current_user,
+    create_access_token,
+    create_refresh_token,
+    get_token_hash,
+    get_password_hash,
+    verify_password
+)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
@@ -81,3 +97,55 @@ def logout(req: LogoutRequest, db: Session = Depends(get_db)):
         db.commit()
         
     return {"success": True, "message": "Đã đăng xuất thành công"}
+
+
+
+
+   # ----------------------------------------------------
+# LOGIN
+# ----------------------------------------------------
+@router.post("/login", response_model=TokenResponse)
+def login(
+    user_in: LoginRequest,
+    db: Session = Depends(get_db)
+):
+
+    user = db.query(User).filter(
+        User.email == user_in.email
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sai email hoặc password"
+        )
+
+    is_valid_password = verify_password(
+        user_in.password,
+        user.password_hash
+    )
+
+    if not is_valid_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sai email hoặc password"
+        )
+
+    access_token = create_access_token(
+        data={
+            "sub": str(user.id),
+            "email": user.email
+        }
+    )
+
+    refresh_token = create_refresh_token(
+        data={
+            "sub": str(user.id)
+        }
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
