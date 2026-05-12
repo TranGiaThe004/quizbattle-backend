@@ -1,6 +1,8 @@
+# quizbattle-backend/app/api/v1/routes/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm  # <-- THÊM DÒNG NÀY
 from sqlalchemy.orm import Session
-from datetime import datetime,timezone
+from datetime import datetime, timezone
 from app.db.session import get_db
 
 # Import các Models
@@ -8,18 +10,15 @@ from app.models.token import RefreshToken
 from app.models.user import User
 
 # Import Schemas
-# from app.schemas.auth import RefreshTokenRequest, LogoutRequest, UserCreate, UserResponse
 from app.schemas.auth import (
     RefreshTokenRequest,
     LogoutRequest,
     UserCreate,
     UserResponse,
-    LoginRequest,
     TokenResponse
 )
 
 # Import logic Security
-# from app.core.security import get_current_user, create_access_token, get_token_hash, get_password_hash
 from app.core.security import (
     get_current_user,
     create_access_token,
@@ -97,38 +96,35 @@ def logout(req: LogoutRequest, db: Session = Depends(get_db)):
         
     return {"success": True, "message": "Đã đăng xuất thành công"}
 
-
-
-
-   # ----------------------------------------------------
-# LOGIN
+# ----------------------------------------------------
+# LOGIN (ĐÃ SỬA CHUẨN FORM DATA THEO TV C)
 # ----------------------------------------------------
 @router.post("/login", response_model=TokenResponse)
 def login(
-    user_in: LoginRequest,
+    form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
-
+    # Sử dụng form_data.username (thay vì email) để khớp với chuẩn OAuth2 của FastAPI
     user = db.query(User).filter(
-        User.email == user_in.email
+        User.email == form_data.username
     ).first()
 
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Sai email hoặc password",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sai email hoặc password"
-        )
+        raise credentials_exception
 
     is_valid_password = verify_password(
-        user_in.password,
+        form_data.password,
         user.password_hash
     )
 
     if not is_valid_password:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sai email hoặc password"
-        )
+        raise credentials_exception
 
     access_token = create_access_token(
         data={
