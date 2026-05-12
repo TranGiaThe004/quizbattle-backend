@@ -4,8 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 
 from app.models.quiz import Quiz
-from app.models.question import Question
-from app.models.question_option import QuestionOption
+from app.models.question import Question, QuestionOption
 from app.models.user import User
 
 from app.schemas.quiz import QuestionUpdate
