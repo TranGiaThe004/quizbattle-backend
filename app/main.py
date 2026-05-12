@@ -4,8 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.base import Base
 from app.db.session import engine
 
-from app.api.v1.routes import auth, quizzes, questions
-from app.api.v1.routes import rooms
+from app.api.v1.routes import auth, quizzes, questions, websockets, rooms
 
 
 app = FastAPI(
@@ -30,6 +29,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(quizzes.router)
 app.include_router(questions.router)
+app.include_router(websockets.router)
 app.include_router(rooms.router)
 
 @app.get("/")

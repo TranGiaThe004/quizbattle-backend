@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1/quizzes", tags=["Quizzes"])
 @router.post("", response_model=QuizResponse)
 def create_quiz(quiz_in: QuizCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     new_quiz = Quiz(
-        owner_id=current_user.id,
+        host_id=current_user.id,
         title=quiz_in.title,
         description=quiz_in.description,
         is_public=quiz_in.is_public
@@ -36,7 +36,7 @@ def create_quiz(quiz_in: QuizCreate, db: Session = Depends(get_db), current_user
 # =========================================
 @router.get("")
 def get_quizzes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    quizzes = db.query(Quiz).filter(Quiz.owner_id == current_user.id).all()
+    quizzes = db.query(Quiz).filter(Quiz.host_id == current_user.id).all()
     return quizzes
 
 # =========================================
@@ -73,7 +73,7 @@ def update_quiz(quiz_id: int, quiz_in: QuizUpdate, db: Session = Depends(get_db)
     if not quiz:
         raise HTTPException(status_code=404, detail="Không tìm thấy Quiz.")
 
-    if quiz.owner_id != current_user.id:
+    if quiz.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="FORBIDDEN: Bạn không có quyền sửa quiz này.")
 
     update_data = quiz_in.dict(exclude_unset=True)
@@ -92,7 +92,7 @@ def delete_quiz(quiz_id: int, db: Session = Depends(get_db), current_user: User 
     if not quiz:
         raise HTTPException(status_code=404, detail="Không tìm thấy Quiz.")
 
-    if quiz.owner_id != current_user.id:
+    if quiz.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="FORBIDDEN: Bạn không có quyền xóa quiz này.")
 
     db.delete(quiz)
@@ -115,8 +115,11 @@ def create_question(quiz_id: int, question_in: QuestionCreate, db: Session = Dep
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz không tồn tại")
 
-    if quiz.owner_id != current_user.id:
+    # THÊM DÒNG NÀY ĐỂ DEBUG:
+    print(f"--- DEBUG PHÂN QUYỀN: ID Chủ phòng: {quiz.host_id} | ID Người gọi API: {current_user.id} ---")
+    if quiz.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Bạn không có quyền thêm câu hỏi")
+    
 
     new_question = Question(
         quiz_id=quiz_id,
@@ -147,7 +150,7 @@ def create_true_false_question(quiz_id: int, req: TrueFalseQuestionCreate, db: S
     if not quiz:
         raise HTTPException(status_code=404, detail="Không tìm thấy Quiz để thêm câu hỏi")
     
-    if quiz.owner_id != current_user.id:
+    if quiz.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Bạn không có quyền thêm câu hỏi")
 
     current_count = db.query(Question).filter(Question.quiz_id == quiz_id).count()
