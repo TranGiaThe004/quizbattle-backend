@@ -20,7 +20,7 @@ def verify_question_ownership(question_id: int, user_id: int, db: Session):
         raise HTTPException(status_code=404, detail="Không tìm thấy câu hỏi.")
     
     quiz = db.query(Quiz).filter(Quiz.id == question.quiz_id).first()
-    if quiz.owner_id != user_id:
+    if quiz.host_id != user_id:
         raise HTTPException(status_code=403, detail="FORBIDDEN: Bạn không có quyền thao tác trên câu hỏi này.")
     return question
 

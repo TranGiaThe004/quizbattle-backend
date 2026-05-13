@@ -17,6 +17,9 @@ class RoomJoin(BaseModel):
 
 router = APIRouter(prefix="/api/v1/rooms", tags=["Rooms"])
 
+# ==========================================
+# 1. API CREATE ROOM (CỦA LEADER)
+# ==========================================
 @router.post("", response_model=RoomResponse)
 def create_room(req: RoomCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # 1. Kiểm tra Quiz có tồn tại không
@@ -44,7 +47,8 @@ def create_room(req: RoomCreate, db: Session = Depends(get_db), current_user: Us
     host_player = RoomPlayer(
         room_id=new_room.id,
         user_id=current_user.id,
-        display_name=current_user.username # Lấy username làm tên hiển thị
+        display_name=getattr(current_user, 'username', None) or current_user.email.split("@")[0],
+        is_connected=True
     )
     db.add(host_player)
     db.commit()
@@ -60,31 +64,36 @@ def create_room(req: RoomCreate, db: Session = Depends(get_db), current_user: Us
         "message": "Tạo phòng thành công"
     }
 
-
-
+# ==========================================
+# 2. API JOIN ROOM (CỦA MEMBER B)
+# ==========================================
 @router.post("/join")
 def join_room(req: RoomJoin, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # 1. Kiểm tra phòng có tồn tại không
-    room = db.query(GameRoom).filter(GameRoom.room_code == req.room_code).first()
+    # 1. Ép mã phòng viết hoa để query DB chuẩn xác nhất
+    upper_room_code = req.room_code.strip().upper()
+
+    # 2. Kiểm tra phòng có tồn tại không
+    room = db.query(GameRoom).filter(GameRoom.room_code == upper_room_code).first()
     if not room:
-        raise HTTPException(status_code=404, detail="Mã phòng không tồn tại")
+        raise HTTPException(status_code=404, detail="Mã phòng không tồn tại. Vui lòng kiểm tra lại!")
     
-    # 2. Kiểm tra trạng thái (Chỉ cho join khi đang waiting)
+    # 3. Kiểm tra trạng thái (Chỉ cho join khi đang waiting)
     if room.status.value != "waiting":
-        raise HTTPException(status_code=400, detail="Phòng đang chơi hoặc đã kết thúc")
+        raise HTTPException(status_code=400, detail="Phòng đang chơi hoặc đã kết thúc. Không thể tham gia!")
         
-    # 3. Kiểm tra xem player đã ở trong phòng chưa (tránh duplicate)
+    # 4. Kiểm tra xem player đã ở trong phòng chưa (tránh duplicate)
     existing_player = db.query(RoomPlayer).filter(
         RoomPlayer.room_id == room.id,
         RoomPlayer.user_id == current_user.id
     ).first()
     
-    # 4. Nếu chưa có thì thêm player vào phòng
+    # 5. Nếu chưa có thì thêm player vào phòng
     if not existing_player:
         new_player = RoomPlayer(
             room_id=room.id,
             user_id=current_user.id,
-            display_name=getattr(current_user, 'username', current_user.email.split("@")[0])
+            display_name=getattr(current_user, 'username', None) or current_user.email.split("@")[0],
+            is_connected=True
         )
         db.add(new_player)
         db.commit()
