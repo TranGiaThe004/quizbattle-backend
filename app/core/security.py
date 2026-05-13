@@ -93,3 +93,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     hashed_password_byte_enc = hashed_password.encode('utf-8')
     return bcrypt.checkpw(password=password_byte_enc, hashed_password=hashed_password_byte_enc)
 
+def decode_access_token(token: str) -> dict:
+    """
+    Hàm này dùng để giải mã token (đặc biệt hữu ích cho WebSockets khi không dùng Depends được).
+    Nếu token hợp lệ, trả về payload (dict chứa thông tin user).
+    Nếu token sai hoặc hết hạn, ném ra lỗi.
+    """
+    try:
+        # Lưu ý: SECRET_KEY và ALGORITHM phải khớp với biến bạn đang dùng để tạo token
+        # Thường nó nằm ở file config (app.core.config.settings)
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        raise ValueError("Token không hợp lệ hoặc đã hết hạn")
+
