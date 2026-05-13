@@ -9,3 +9,4 @@ from app.models.user import User
 from app.models.quiz import Quiz
 from app.models.question import Question, QuestionOption
 from app.models.room import GameRoom, RoomPlayer
+from app.models.game_session import GameSession, PlayerAnswer
