@@ -6,6 +6,9 @@ from app.models.room import GameRoom
 from app.models.quiz import Quiz
 from app.models.question import Question, QuestionOption
 
+# [THÊM Ở SPRINT 5]: Import model GameSession để cập nhật thời gian kết thúc
+from app.models.game_session import GameSession 
+
 async def start_game_loop(room_code: str, websocket_manager):
     """
     Trọng tài ảo: Background task điều phối vòng lặp game.
@@ -26,15 +29,36 @@ async def start_game_loop(room_code: str, websocket_manager):
             quiz = db.query(Quiz).filter(Quiz.id == room.quiz_id).first()
             questions = db.query(Question).filter(Question.quiz_id == quiz.id).order_by(Question.order_index).all()
 
-            # KIỂM TRA HẾT GAME
+            # =========================================================
+            # [SPRINT 5 - TASK TTGT-75 CỦA LEADER]: XỬ LÝ KẾT THÚC GAME
+            # =========================================================
             if room.current_question_index >= len(questions):
+                # 1. Đổi trạng thái phòng thành finished để khóa join/submit
                 room.status = "finished" 
+                
+                # 2. Tìm Game Session hiện tại và cập nhật thời gian kết thúc
+                game_session = db.query(GameSession).filter(
+                    GameSession.room_id == room.id
+                ).order_by(GameSession.id.desc()).first()
+                
+                session_id = None
+                if game_session:
+                    game_session.ended_at = datetime.now(timezone.utc)
+                    session_id = game_session.id
+                
+                # Lưu thay đổi xuống Database
                 db.commit()
+                
+                # 3. Broadcast sự kiện game_finished kèm session_id
                 await websocket_manager.broadcast_to_room(room_code, {
                     "event": "game_finished",
-                    "payload": {"message": "Trò chơi đã kết thúc!"}
+                    "payload": {
+                        "message": "Trò chơi đã kết thúc!",
+                        "session_id": session_id # Rất quan trọng để TV B và C gọi API
+                    }
                 })
                 break
+            # =========================================================
 
             current_question = questions[room.current_question_index]
             options = db.query(QuestionOption).filter(QuestionOption.question_id == current_question.id).all()
@@ -42,7 +66,6 @@ async def start_game_loop(room_code: str, websocket_manager):
             # ==========================================
             # BƯỚC 1: BẮN SỰ KIỆN "QUESTION STARTED"
             # ==========================================
-            # BẢO MẬT: Phải xóa trường is_correct khỏi payload trước khi gửi cho Client
             safe_options = [
                 {"id": opt.id, "text": opt.option_text} for opt in options
             ]
@@ -68,13 +91,11 @@ async def start_game_loop(room_code: str, websocket_manager):
             # ==========================================
             # BƯỚC 2: AUTO TIMEOUT (ĐẾM GIỜ NGẦM)
             # ==========================================
-            # Tạm ngưng Vòng lặp bằng đúng số giây của câu hỏi
             await asyncio.sleep(time_limit)
 
             # ==========================================
             # BƯỚC 3: AUTO NEXT QUESTION (CHỐT CÂU HỎI)
             # ==========================================
-            # 3.1. Hết giờ, bắn kết quả đúng xuống Client
             correct_option_ids = [opt.id for opt in options if opt.is_correct]
 
             result_payload = {
@@ -86,10 +107,10 @@ async def start_game_loop(room_code: str, websocket_manager):
             }
             await websocket_manager.broadcast_to_room(room_code, result_payload)
 
-            # 3.2. Dừng 3 giây để người chơi xem kết quả Đỏ/Xanh
+            # Chờ Frontend hiển thị kết quả Xanh/Đỏ và Live Leaderboard trong 3 giây
             await asyncio.sleep(3)
 
-            # 3.3. Tăng index câu hỏi, chuẩn bị lặp lại vòng while cho câu tiếp theo
+            # Tăng index câu hỏi, lặp lại cho câu tiếp theo
             room.current_question_index += 1
             db.commit()
 
