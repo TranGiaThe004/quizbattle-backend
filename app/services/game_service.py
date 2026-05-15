@@ -1,3 +1,4 @@
+# app/services/game_service.py
 import asyncio
 from datetime import datetime, timezone
 # Giả định bạn import SessionLocal từ cấu hình DB của team
@@ -15,8 +16,9 @@ async def start_game_loop(room_code: str, websocket_manager):
     db = SessionLocal()
     
     try:
+        # [ĐÃ SỬA]: Đổi "type" thành "event"
         await websocket_manager.broadcast_to_room(room_code, {
-            "type": "game_started",
+            "event": "game_started",
             "payload": {"message": "Game chuẩn bị bắt đầu!"}
         })
         
@@ -45,8 +47,9 @@ async def start_game_loop(room_code: str, websocket_manager):
                 db.commit()
 
                 # Broadcast sự kiện kết thúc kèm session_id
+                # [ĐÃ SỬA]: Đổi "type" thành "event"
                 await websocket_manager.broadcast_to_room(room_code, {
-                    "type": "game_finished",
+                    "event": "game_finished",
                     "payload": {
                         "message": "Trò chơi đã kết thúc!",
                         "session_id": game_session.id if game_session else None
@@ -60,7 +63,7 @@ async def start_game_loop(room_code: str, websocket_manager):
             # ==========================================
             # BƯỚC 1: BẮN SỰ KIỆN "QUESTION STARTED"
             # ==========================================
-            # BẢO MẬT CHẶT CHẼ: Xóa trường is_correct để chống cheat qua DevTools [cite: 429, 473]
+            # BẢO MẬT CHẶT CHẼ: Xóa trường is_correct để chống cheat qua DevTools
             safe_options = [
                 {"id": opt.id, "text": opt.option_text} for opt in options
             ]
@@ -72,7 +75,8 @@ async def start_game_loop(room_code: str, websocket_manager):
                 time_limit = 20
 
             question_payload = {
-                "type": "question_started",
+                # [ĐÃ SỬA]: Đổi "type" thành "event"
+                "event": "question_started",
                 "payload": {
                     "question_id": current_question.id,
                     "question_text": current_question.question_text,
@@ -87,17 +91,18 @@ async def start_game_loop(room_code: str, websocket_manager):
             # ==========================================
             # BƯỚC 2: AUTO TIMEOUT (ĐẾM GIỜ NGẦM)
             # ==========================================
-            # Server chủ động dừng task lại để chờ người chơi submit [cite: 459]
+            # Server chủ động dừng task lại để chờ người chơi submit
             await asyncio.sleep(current_question.time_limit_seconds)
 
             # ==========================================
             # BƯỚC 3: AUTO NEXT QUESTION (CHỐT CÂU HỎI)
             # ==========================================
-            # Hết giờ, tính toán và gửi đáp án đúng xuống Client [cite: 460, 461]
+            # Hết giờ, tính toán và gửi đáp án đúng xuống Client
             correct_option_ids = [opt.id for opt in options if opt.is_correct]
 
             result_payload = {
-                "type": "question_result",
+                # [ĐÃ SỬA]: Đổi "type" thành "event"
+                "event": "question_result",
                 "payload": {
                     "question_id": current_question.id,
                     "correct_option_ids": correct_option_ids
@@ -105,7 +110,6 @@ async def start_game_loop(room_code: str, websocket_manager):
             }
             await websocket_manager.broadcast_to_room(room_code, result_payload)
 
-            # (Ở đây bạn có thể chèn hàm broadcast leaderboard_updated nếu đã làm xong chức năng chấm điểm)
             players = db.query(RoomPlayer).filter(RoomPlayer.room_id == room.id).order_by(desc(RoomPlayer.score)).all()
             leaderboard_data = [
                 {
@@ -114,14 +118,15 @@ async def start_game_loop(room_code: str, websocket_manager):
                     "score": p.score
                 } for p in players
             ]
+            
             # 3. Phát sự kiện leaderboard_updated cho toàn phòng
+            # [ĐÃ SỬA]: Đổi "type" thành "event" và đẩy trực tiếp mảng leaderboard_data vào payload
             await websocket_manager.broadcast_to_room(room_code, {
-                "type": "leaderboard_updated",
-                "payload": {"leaderboard": leaderboard_data}
+                "event": "leaderboard_updated",
+                "payload": leaderboard_data
             })
 
-
-            # Dừng 3 giây để Frontend hiển thị hiệu ứng Xanh/Đỏ [cite: 462]
+            # Dừng 3 giây để Frontend hiển thị hiệu ứng Xanh/Đỏ
             await asyncio.sleep(3)
 
             # Tăng index câu hỏi lên 1 và lưu vào DB

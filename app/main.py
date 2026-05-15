@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.base import Base
 from app.db.session import engine
 
-from app.api.v1.routes import auth, quizzes, questions, websockets, rooms, results
+from app.api.v1.routes import auth, quizzes, questions, websockets, rooms, results, statistics
 
 
 app = FastAPI(
@@ -32,6 +32,7 @@ app.include_router(questions.router)
 app.include_router(websockets.router)
 app.include_router(rooms.router)
 app.include_router(results.router, prefix="/api/v1/game-sessions", tags=["Results"])
+app.include_router(statistics.router)
 
 @app.get("/")
 def root():

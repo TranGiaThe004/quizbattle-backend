@@ -3,21 +3,12 @@ import asyncio
 from typing import Dict, List, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, status
 from sqlalchemy.orm import Session
-from app.db.session import get_db,SessionLocal
+from app.db.session import get_db, SessionLocal
 from app.models.user import User
-from app.models.room import GameRoom,RoomPlayer
-from app.models.question import QuestionOption
-from app.models.game_session import GameSession,PlayerAnswer
-# Giả sử bạn có hàm giải mã token, nếu tên khác hãy sửa lại nhé:
-from app.core.security import decode_access_token 
-
 from app.models.room import GameRoom, RoomPlayer
 from app.models.question import QuestionOption
-
-# ==========================================
-# [ĐÃ FIX LỖI IMPORT]: Tách riêng 2 đường dẫn
-# ==========================================
-from app.models.game_session import GameSession,PlayerAnswer
+from app.models.game_session import GameSession, PlayerAnswer
+from app.core.security import decode_access_token 
 
 # Import Game Loop của Member C
 from app.services.game_service import start_game_loop
@@ -44,6 +35,7 @@ class ConnectionManager:
                 del self.active_connections[room_code]
 
     async def broadcast_room_state(self, room_code: str):
+        # [ĐÃ FIX 1]: Làm gọn logic, gom kết nối chết lại xóa 1 lần để tránh lỗi KeyError
         if room_code in self.active_connections:
             unique_players = {}
             for connection in self.active_connections[room_code]:
@@ -54,18 +46,16 @@ class ConnectionManager:
             players_list = list(unique_players.values())
             message = {"event": "room_state", "data": {"players": players_list}}
             
-            for connection in list(self.active_connections[room_code]):
+            dead_connections = []
+            for connection in self.active_connections[room_code]:
                 try:
                     await connection["ws"].send_json(message)
                 except Exception:
-                    self.disconnect(connection["ws"], room_code)
+                    dead_connections.append(connection["ws"])
+            
+            for dead_ws in dead_connections:
+                self.disconnect(dead_ws, room_code)
 
-            message = {
-                "event": "room_state",
-                "data": {"players": players_list}
-            }
-            for connection in self.active_connections[room_code]:
-                await connection["ws"].send_json(message)
     async def handle_client_message(self, room_code: str, user_id: int, message: dict):
         """
         Hàm xử lý các sự kiện gửi từ Client lên Server
@@ -134,14 +124,12 @@ class ConnectionManager:
                 
                 db.commit()
 
-                # (Tuỳ chọn) Xác nhận lại với client là server đã nhận đáp án
-                # await self.send_personal_message({"type": "answer_received"}, websocket)
-
             except Exception as e:
                 print(f"Lỗi khi xử lý submit_answer: {e}")
                 db.rollback()
             finally:
                 db.close()
+
     async def broadcast_to_room(self, room_code: str, message: dict):
         """
         Gửi thông điệp tới toàn bộ phòng và tự động dọn dẹp các kết nối đứt.
@@ -196,15 +184,15 @@ async def room_lobby_websocket(
     try:
         while True:
             # 1. Chờ nhận tin nhắn JSON từ Client 
-            # (Ví dụ: {"type": "submit_answer", "payload": {...}})
             data = await websocket.receive_json()
             
             # 2. Đẩy toàn bộ dữ liệu vào hàm xử lý của ConnectionManager
-            # Hàm này sẽ tự động móc tách "type" và "payload" để xử lý chấm điểm!
             await manager.handle_client_message(room_code, user_id, data)
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_code)
-        await manager.broadcast_room_state(room_code)
+        # [ĐÃ FIX 2]: Chặn lỗi KeyError khi người dùng cuối cùng rời phòng
+        if room_code in manager.active_connections:
+            await manager.broadcast_room_state(room_code)
     except Exception as e:
-        print(f"Lỗi WebSocket Endpoint: {e}")  
+        print(f"Lỗi WebSocket Endpoint: {e}")
