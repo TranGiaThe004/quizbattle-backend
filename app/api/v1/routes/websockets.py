@@ -1,3 +1,5 @@
+# app/api/v1/routes/websockets.py
+import asyncio
 from typing import Dict, List, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, status
 from sqlalchemy.orm import Session
@@ -9,48 +11,54 @@ from app.models.game_session import GameSession,PlayerAnswer
 # Giả sử bạn có hàm giải mã token, nếu tên khác hãy sửa lại nhé:
 from app.core.security import decode_access_token 
 
+from app.models.room import GameRoom, RoomPlayer
+from app.models.question import QuestionOption
+
+# ==========================================
+# [ĐÃ FIX LỖI IMPORT]: Tách riêng 2 đường dẫn
+# ==========================================
+from app.models.game_session import GameSession,PlayerAnswer
+
+# Import Game Loop của Member C
+from app.services.game_service import start_game_loop
+
 router = APIRouter()
 
 # --- 1. CLASS CONNECTION MANAGER ---
 class ConnectionManager:
     def __init__(self):
-        # Cấu trúc: { "room_code": [ {"ws": WebSocket, "user": dict}, ... ] }
         self.active_connections: Dict[str, List[Dict[str, Any]]] = {}
 
     async def connect(self, websocket: WebSocket, room_code: str, user_data: dict):
         await websocket.accept()
         if room_code not in self.active_connections:
             self.active_connections[room_code] = []
-            
-        # Thêm người chơi vào danh sách phòng
-        self.active_connections[room_code].append({
-            "ws": websocket,
-            "user": user_data
-        })
+        self.active_connections[room_code].append({"ws": websocket, "user": user_data})
 
     def disconnect(self, websocket: WebSocket, room_code: str):
         if room_code in self.active_connections:
             self.active_connections[room_code] = [
-                conn for conn in self.active_connections[room_code] 
-                if conn["ws"] != websocket
+                conn for conn in self.active_connections[room_code] if conn["ws"] != websocket
             ]
-            # Nếu phòng trống thì dọn dẹp luôn
             if not self.active_connections[room_code]:
                 del self.active_connections[room_code]
 
     async def broadcast_room_state(self, room_code: str):
         if room_code in self.active_connections:
-            # Dùng Dictionary để lọc trùng: Mỗi user_id chỉ được lấy 1 lần
             unique_players = {}
-            
             for connection in self.active_connections[room_code]:
                 user_data = connection.get("user")
                 if user_data:
-                    # Ghi đè vào dict, trùng ID sẽ tự động bị thay thế
                     unique_players[user_data["id"]] = user_data
 
-            # Chuyển lại thành list để gửi đi
             players_list = list(unique_players.values())
+            message = {"event": "room_state", "data": {"players": players_list}}
+            
+            for connection in list(self.active_connections[room_code]):
+                try:
+                    await connection["ws"].send_json(message)
+                except Exception:
+                    self.disconnect(connection["ws"], room_code)
 
             message = {
                 "event": "room_state",
@@ -136,23 +144,30 @@ class ConnectionManager:
                 db.close()
     async def broadcast_to_room(self, room_code: str, message: dict):
         """
-        Gửi một thông điệp (JSON) tới tất cả người chơi đang kết nối trong một phòng.
+        Gửi thông điệp tới toàn bộ phòng và tự động dọn dẹp các kết nối đứt.
         """
         if room_code in self.active_connections:
+            dead_connections = []
+            
+            # 1. Thử gửi tin nhắn cho mọi người
             for connection in self.active_connections[room_code]:
                 try:
-                    # Truy cập vào object WebSocket để gửi dữ liệu
-                    # Tùy theo cấu trúc của team bạn, nó có thể là connection["ws"] hoặc chính là connection
                     ws = connection.get("ws") if isinstance(connection, dict) else connection
                     await ws.send_json(message)
                 except Exception as e:
-                    print(f"Lỗi khi broadcast tới 1 client: {e}")
+                    # Nếu gửi xịt (do user tắt web), đưa vào danh sách cần dọn dẹp
+                    dead_connections.append(connection)
+            
+            # 2. Xóa sổ các "bóng ma" khỏi phòng để lần sau không gửi nhầm nữa
+            for dead in dead_connections:
+                try:
+                    self.active_connections[room_code].remove(dead)
+                except ValueError:
+                    pass
 
 manager = ConnectionManager()
 
 # --- 2. WEBSOCKET ENDPOINT ---
-# Lưu ý: Trình duyệt không hỗ trợ gửi Header chuẩn trong WebSocket, 
-# nên ta phải truyền token qua Query Parameter (?token=...)
 @router.websocket("/ws/rooms/{room_code}")
 async def room_lobby_websocket(
     websocket: WebSocket,
@@ -160,7 +175,6 @@ async def room_lobby_websocket(
     token: str = Query(...), 
     db: Session = Depends(get_db)
 ):
-    # Xác thực người dùng qua token
     try:
         payload = decode_access_token(token)
         user_id = int(payload.get("sub"))
@@ -168,32 +182,29 @@ async def room_lobby_websocket(
         if not user:
             raise ValueError("User not found")
     except Exception:
-        # Đóng kết nối lập tức nếu token lởm
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # Chuẩn bị dữ liệu user để gửi cho mọi người
     user_data = {
         "id": user.id,
         "name": getattr(user, 'username', None) or user.email.split("@")[0],
     }
 
-    # Kết nối và thông báo cho cả phòng biết có người mới
     await manager.connect(websocket, room_code, user_data)
     await manager.broadcast_room_state(room_code)
 
     try:
         while True:
-            # Ở Sảnh chờ (Lobby), ta chỉ cần giữ kết nối sống (keep-alive)
-            # Chờ nhận tin nhắn từ Client (ví dụ Client gửi {"type": "submit_answer", "payload": {...}})
+            # 1. Chờ nhận tin nhắn JSON từ Client 
+            # (Ví dụ: {"type": "submit_answer", "payload": {...}})
             data = await websocket.receive_json()
             
-            # Đẩy vào hàm xử lý
+            # 2. Đẩy toàn bộ dữ liệu vào hàm xử lý của ConnectionManager
+            # Hàm này sẽ tự động móc tách "type" và "payload" để xử lý chấm điểm!
             await manager.handle_client_message(room_code, user_id, data)
-            # Tạm thời chưa cần nhận data gì từ client, chỉ lắng nghe
-            data = await websocket.receive_text()
-            
+                
     except WebSocketDisconnect:
-        # Có người tắt tab hoặc mất mạng -> Xóa khỏi list và báo cho cả phòng
         manager.disconnect(websocket, room_code)
         await manager.broadcast_room_state(room_code)
+    except Exception as e:
+        print(f"Lỗi WebSocket Endpoint: {e}")  

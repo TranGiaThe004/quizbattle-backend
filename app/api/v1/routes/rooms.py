@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from pydantic import BaseModel
 from app.models.room import GameRoom, RoomPlayer
+from app.models.game_session import GameSession
 from app.models.quiz import Quiz
 from app.models.user import User
 from app.models.question import Question
@@ -127,9 +128,23 @@ async def start_game(room_code: str, db: Session = Depends(get_db), current_user
     # Đánh dấu game bắt đầu
     room.status = "playing"
     room.current_question_index = 0
+
+    # ==========================================
+    # FIX SPRINT 5: TẠO PHIÊN CHƠI ĐỂ GHI NHẬN ĐÁP ÁN
+    # ==========================================
+    new_session = GameSession(room_id=room.id, quiz_id=room.quiz_id, host_id=current_user.id)
+    db.add(new_session)
+    # =========================================
+
+
     db.commit()
 
     # Kích hoạt Trọng tài ảo chạy ngầm (Non-blocking)
-    asyncio.create_task(start_game_loop(room_code, websocket_manager))
+    
+    try:
+        asyncio.create_task(start_game_loop(room_code, websocket_manager))
+    except Exception as e:
+        print(f"LỖI KHỞI ĐỘNG TRỌNG TÀI ẢO: {e}")
+        raise HTTPException(status_code=500, detail="Lỗi server khi khởi tạo Game Loop")
 
     return {"success": True, "message": "Game started!"}

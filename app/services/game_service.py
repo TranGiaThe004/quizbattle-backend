@@ -2,9 +2,10 @@ import asyncio
 from datetime import datetime, timezone
 # Giả định bạn import SessionLocal từ cấu hình DB của team
 from app.db.session import SessionLocal 
-from app.models.room import GameRoom
+from app.models.room import GameRoom,RoomPlayer
 from app.models.quiz import Quiz
 from app.models.question import Question, QuestionOption
+from sqlalchemy import desc
 
 async def start_game_loop(room_code: str, websocket_manager):
     """
@@ -31,15 +32,25 @@ async def start_game_loop(room_code: str, websocket_manager):
             quiz = db.query(Quiz).filter(Quiz.id == room.quiz_id).first()
             questions = db.query(Question).filter(Question.quiz_id == quiz.id).order_by(Question.order_index).all()
 
-            # KẾT THÚC GAME: Nếu đã chạy hết câu hỏi [cite: 463]
+            # KẾT THÚC GAME: Nếu đã chạy hết câu hỏi
             if room.current_question_index >= len(questions):
                 room.status = "finished" 
+                
+                # ==========================================
+                # SPRINT 5: LẤY SESSION_ID ĐỂ GỬI CHO FRONTEND
+                # ==========================================
+                from app.models.game_session import GameSession
+                game_session = db.query(GameSession).filter(GameSession.room_id == room.id).order_by(GameSession.id.desc()).first()
+                
                 db.commit()
 
-                # Broadcast sự kiện kết thúc [cite: 263, 463]
+                # Broadcast sự kiện kết thúc kèm session_id
                 await websocket_manager.broadcast_to_room(room_code, {
                     "type": "game_finished",
-                    "payload": {"message": "Trò chơi đã kết thúc!"}
+                    "payload": {
+                        "message": "Trò chơi đã kết thúc!",
+                        "session_id": game_session.id if game_session else None
+                    }
                 })
                 break
 
@@ -95,6 +106,20 @@ async def start_game_loop(room_code: str, websocket_manager):
             await websocket_manager.broadcast_to_room(room_code, result_payload)
 
             # (Ở đây bạn có thể chèn hàm broadcast leaderboard_updated nếu đã làm xong chức năng chấm điểm)
+            players = db.query(RoomPlayer).filter(RoomPlayer.room_id == room.id).order_by(desc(RoomPlayer.score)).all()
+            leaderboard_data = [
+                {
+                    "user_id": p.user_id,
+                    "display_name": p.display_name,
+                    "score": p.score
+                } for p in players
+            ]
+            # 3. Phát sự kiện leaderboard_updated cho toàn phòng
+            await websocket_manager.broadcast_to_room(room_code, {
+                "type": "leaderboard_updated",
+                "payload": {"leaderboard": leaderboard_data}
+            })
+
 
             # Dừng 3 giây để Frontend hiển thị hiệu ứng Xanh/Đỏ [cite: 462]
             await asyncio.sleep(3)
