@@ -5,6 +5,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, s
 from sqlalchemy.orm import Session
 from app.db.session import get_db, SessionLocal
 from app.models.user import User
+import json
 from app.models.room import GameRoom, RoomPlayer
 from app.models.question import QuestionOption
 from app.models.game_session import GameSession, PlayerAnswer
@@ -35,7 +36,6 @@ class ConnectionManager:
                 del self.active_connections[room_code]
 
     async def broadcast_room_state(self, room_code: str):
-        # [ĐÃ FIX 1]: Làm gọn logic, gom kết nối chết lại xóa 1 lần để tránh lỗi KeyError
         if room_code in self.active_connections:
             unique_players = {}
             for connection in self.active_connections[room_code]:
@@ -44,6 +44,7 @@ class ConnectionManager:
                     unique_players[user_data["id"]] = user_data
 
             players_list = list(unique_players.values())
+            # CHUẨN ĐANG DÙNG LÀ event VÀ data
             message = {"event": "room_state", "data": {"players": players_list}}
             
             dead_connections = []
@@ -56,35 +57,53 @@ class ConnectionManager:
             for dead_ws in dead_connections:
                 self.disconnect(dead_ws, room_code)
 
+    async def broadcast_to_room(self, room_code: str, message: dict):
+        """
+        Gửi thông điệp tới toàn bộ phòng và tự động dọn dẹp các kết nối đứt.
+        """
+        if room_code in self.active_connections:
+            dead_connections = []
+            
+            for connection in self.active_connections[room_code]:
+                try:
+                    ws = connection.get("ws") if isinstance(connection, dict) else connection
+                    await ws.send_json(message)
+                except Exception as e:
+                    dead_connections.append(connection)
+            
+            for dead in dead_connections:
+                try:
+                    self.active_connections[room_code].remove(dead)
+                except ValueError:
+                    pass
+
     async def handle_client_message(self, room_code: str, user_id: int, message: dict):
         """
-        Hàm xử lý các sự kiện gửi từ Client lên Server
+        Hàm xử lý TẤT CẢ các sự kiện gửi từ Client lên Server
         """
-        event_type = message.get("type")
-        payload = message.get("payload", {})
+        # Hứng từ khóa 'event' và 'data' cho đồng bộ với lúc gửi xuống
+        event_type = message.get("event")
+        payload_data = message.get("data", {})
 
+        # --- LOGIC 1: CHẤM ĐIỂM (CŨ) ---
         if event_type == "submit_answer":
-            # Mở DB Session để xử lý
             db = SessionLocal()
             try:
-                question_id = payload.get("question_id")
-                selected_option_id = payload.get("selected_option_id")
-                response_time_ms = payload.get("response_time_ms", 0)
+                question_id = payload_data.get("question_id")
+                selected_option_id = payload_data.get("selected_option_id")
+                response_time_ms = payload_data.get("response_time_ms", 0)
 
-                # 1. Tìm thông tin phòng, player và game_session hiện tại
                 room = db.query(GameRoom).filter(GameRoom.room_code == room_code).first()
                 player = db.query(RoomPlayer).filter(
                     RoomPlayer.room_id == room.id, 
                     RoomPlayer.user_id == user_id
                 ).first()
                 
-                # Giả định MVP: 1 room có 1 game_session đang active
                 game_session = db.query(GameSession).filter(GameSession.room_id == room.id).order_by(GameSession.id.desc()).first()
 
                 if not room or not player or not game_session:
                     return
 
-                # 2. Chống Cheat: Kiểm tra xem đã trả lời câu này chưa (tránh submit nhiều lần)
                 existing_answer = db.query(PlayerAnswer).filter(
                     PlayerAnswer.game_session_id == game_session.id,
                     PlayerAnswer.room_player_id == player.id,
@@ -92,21 +111,16 @@ class ConnectionManager:
                 ).first()
 
                 if existing_answer:
-                    # Gửi cảnh báo về cho client gian lận (hoặc bỏ qua)
                     return 
 
-                # 3. Chấm điểm (Xác định đúng/sai)
                 selected_option = db.query(QuestionOption).filter(QuestionOption.id == selected_option_id).first()
-                
                 is_correct = selected_option.is_correct if selected_option else False
                 score_delta = 0
 
                 if is_correct:
-                    # Công thức tính điểm MVP chuẩn từ SRS
                     raw_score = 1000 - int(response_time_ms / 100)
                     score_delta = max(100, raw_score)
 
-                # 4. Lưu lịch sử trả lời vào DB
                 new_answer = PlayerAnswer(
                     game_session_id=game_session.id,
                     room_player_id=player.id,
@@ -118,7 +132,6 @@ class ConnectionManager:
                 )
                 db.add(new_answer)
 
-                # 5. Cộng điểm trực tiếp cho Player
                 if score_delta > 0:
                     player.score += score_delta
                 
@@ -130,28 +143,32 @@ class ConnectionManager:
             finally:
                 db.close()
 
-    async def broadcast_to_room(self, room_code: str, message: dict):
-        """
-        Gửi thông điệp tới toàn bộ phòng và tự động dọn dẹp các kết nối đứt.
-        """
-        if room_code in self.active_connections:
-            dead_connections = []
+        # --- LOGIC 2: CHAT REALTIME (ĐÃ CHUYỂN VÀO ĐÂY) ---
+        elif event_type == "send_chat":
+            message_text = payload_data.get("message", "").strip()
             
-            # 1. Thử gửi tin nhắn cho mọi người
-            for connection in self.active_connections[room_code]:
-                try:
-                    ws = connection.get("ws") if isinstance(connection, dict) else connection
-                    await ws.send_json(message)
-                except Exception as e:
-                    # Nếu gửi xịt (do user tắt web), đưa vào danh sách cần dọn dẹp
-                    dead_connections.append(connection)
-            
-            # 2. Xóa sổ các "bóng ma" khỏi phòng để lần sau không gửi nhầm nữa
-            for dead in dead_connections:
-                try:
-                    self.active_connections[room_code].remove(dead)
-                except ValueError:
-                    pass
+            if message_text:
+                # Tìm tên của người gửi (Lấy từ danh sách kết nối hiện tại cho nhanh, khỏi query DB)
+                display_name = "Player"
+                if room_code in self.active_connections:
+                    for conn in self.active_connections[room_code]:
+                        if conn["user"]["id"] == user_id:
+                            display_name = conn["user"]["name"]
+                            break
+
+                # Đóng gói tin nhắn theo chuẩn event/data để gửi đi
+                broadcast_event = {
+                    "event": "chat_message",
+                    "data": {
+                        "user_id": user_id,
+                        "display_name": display_name,
+                        "message": message_text
+                    }
+                }
+                
+                print(f"🚀 [Chat] {display_name} -> {room_code}: {message_text}")
+                await self.broadcast_to_room(room_code, broadcast_event)
+
 
 manager = ConnectionManager()
 
@@ -183,15 +200,14 @@ async def room_lobby_websocket(
 
     try:
         while True:
-            # 1. Chờ nhận tin nhắn JSON từ Client 
+            # Chờ nhận tin nhắn JSON từ Client 
             data = await websocket.receive_json()
             
-            # 2. Đẩy toàn bộ dữ liệu vào hàm xử lý của ConnectionManager
+            # Đẩy toàn bộ dữ liệu vào hàm xử lý
             await manager.handle_client_message(room_code, user_id, data)
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_code)
-        # [ĐÃ FIX 2]: Chặn lỗi KeyError khi người dùng cuối cùng rời phòng
         if room_code in manager.active_connections:
             await manager.broadcast_room_state(room_code)
     except Exception as e:
