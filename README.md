@@ -33,6 +33,7 @@ python -m uvicorn app.main:app --reload
 docker compose up -d
 docker compose down
 docker ps
+docker compose down -v và docker compose up --build
 =======
 ### Cách tạo dữ liệu mẫu (Seed Data)
 Sau khi setup database và chạy migration, bạn có thể tạo ngay một bộ dữ liệu có sẵn (User, Quiz, Question) để test nhanh giao diện bằng lệnh sau:

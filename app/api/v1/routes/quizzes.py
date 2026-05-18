@@ -16,6 +16,36 @@ from typing import List
 router = APIRouter(prefix="/api/v1/quizzes", tags=["Quizzes"])
 
 # =========================================
+# [THÊM MỚI - MEMBER B]: GET PUBLIC QUIZZES
+# =========================================
+@router.get("/public", response_model=dict)
+def get_public_quizzes(db: Session = Depends(get_db)):
+    """
+    API lấy danh sách các Quiz công khai (is_public == True)
+    """
+    try:
+        # Lọc các quiz public và sắp xếp mới nhất lên đầu
+        public_quizzes = db.query(Quiz).filter(Quiz.is_public == True).order_by(Quiz.id.desc()).all()
+        
+        quiz_list = []
+        for q in public_quizzes:
+            quiz_list.append({
+                "id": q.id,
+                "title": q.title,
+                "description": q.description,
+                "is_public": q.is_public,
+                "host_id": q.host_id
+            })
+            
+        return {
+            "success": True,
+            "data": quiz_list,
+            "message": "Lấy danh sách Public Quizzes thành công"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
+
+# =========================================
 # CREATE QUIZ
 # =========================================
 @router.post("", response_model=QuizResponse)
@@ -44,7 +74,6 @@ def get_quizzes(db: Session = Depends(get_db), current_user: User = Depends(get_
 # =========================================
 @router.get("/{quiz_id}", response_model=dict)
 def get_quiz_detail(quiz_id: int, db: Session = Depends(get_db)):
-    # Dùng joinedload để query một lần lấy cả Quiz -> Questions -> Options (Tránh N+1 query)
     quiz = db.query(Quiz).options(
         joinedload(Quiz.questions).joinedload(Question.options)
     ).filter(Quiz.id == quiz_id).first()
@@ -52,7 +81,6 @@ def get_quiz_detail(quiz_id: int, db: Session = Depends(get_db)):
     if not quiz:
         raise HTTPException(status_code=404, detail="Không tìm thấy Quiz")
 
-    # Serialize dữ liệu trả về
     return {
         "success": True,
         "data": {
@@ -115,12 +143,9 @@ def create_question(quiz_id: int, question_in: QuestionCreate, db: Session = Dep
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz không tồn tại")
 
-    # THÊM DÒNG NÀY ĐỂ DEBUG:
-    print(f"--- DEBUG PHÂN QUYỀN: ID Chủ phòng: {quiz.host_id} | ID Người gọi API: {current_user.id} ---")
     if quiz.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Bạn không có quyền thêm câu hỏi")
     
-
     new_question = Question(
         quiz_id=quiz_id,
         question_text=question_in.question_text,

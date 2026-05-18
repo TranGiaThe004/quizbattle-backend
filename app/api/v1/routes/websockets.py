@@ -83,7 +83,7 @@ class ConnectionManager:
         """
         # Hứng từ khóa 'event' và 'data' cho đồng bộ với lúc gửi xuống
         event_type = message.get("event")
-        payload_data = message.get("data", {})
+        payload_data = message.get("data") or message.get("payload", {})
 
         # --- LOGIC 1: CHẤM ĐIỂM (CŨ) ---
         if event_type == "submit_answer":
