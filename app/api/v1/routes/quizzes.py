@@ -13,6 +13,9 @@ from app.schemas.common import StandardResponse
 from app.core.security import get_current_user
 from typing import List
 
+from fastapi import Query
+from app.schemas.quiz import QuizPublicOut
+
 router = APIRouter(prefix="/api/v1/quizzes", tags=["Quizzes"])
 
 # =========================================
@@ -182,3 +185,18 @@ def create_true_false_question(quiz_id: int, req: TrueFalseQuestionCreate, db: S
     db.commit()
 
     return {"success": True, "message": "Đã thêm câu hỏi True/False thành công"}
+
+@router.get("/public-quizzes", response_model=list[QuizPublicOut])
+def get_public_quizzes(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, le=100),
+    db: Session = Depends(get_db),
+):
+    return (
+        db.query(Quiz)
+        .filter(Quiz.is_public == True)
+        .order_by(Quiz.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
