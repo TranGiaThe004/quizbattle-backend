@@ -126,8 +126,15 @@ async def start_game_loop(room_code: str, websocket_manager):
                 "payload": leaderboard_data
             })
 
+            is_last_question = (room.current_question_index == len(questions) - 1)
+            if is_last_question:
+                await websocket_manager.broadcast_to_room(room_code, {
+                    "event": "last_question_warning", 
+                    "data": {}
+                })
+
             # Dừng 3 giây để Frontend hiển thị hiệu ứng Xanh/Đỏ
-            await asyncio.sleep(3)
+            await asyncio.sleep(8)
 
             # Tăng index câu hỏi lên 1 và lưu vào DB
             room.current_question_index += 1
